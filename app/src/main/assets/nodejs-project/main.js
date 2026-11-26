@@ -87,7 +87,8 @@ function startFile(file, argsText) {
         parentPort.postMessage({ type: 'error', line: error && error.stack ? error.stack : String(error) });
       }
     `;
-    const parsedArgs = String(argsText || '').trim().split(/\\s+/).filter(Boolean);\n    const worker = new Worker(workerSource, { eval: true, workerData: { file: absolute, args: parsedArgs } });
+    const parsedArgs = String(argsText || '').trim().split(/\s+/).filter(Boolean);
+    const worker = new Worker(workerSource, { eval: true, workerData: { file: absolute, args: parsedArgs } });
     activeWorker = worker;
     worker.on('message', message => {
       if (thisRun !== runId) return;
