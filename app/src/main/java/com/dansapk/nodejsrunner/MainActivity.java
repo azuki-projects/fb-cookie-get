@@ -161,7 +161,7 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("Create project").setView(input)
             .setPositiveButton("Create", (d,w) -> {
                 String name = input.getText().toString().trim();
-                if (name.isEmpty() || name.contains("/") || name.contains("\\\\") || name.equals(".") || name.equals("..")) {
+                if (name.isEmpty() || name.contains("/") || name.contains("\\") || name.equals(".") || name.equals("..")) {
                     toast("Invalid project name"); return;
                 }
                 File f = new File(projectsDir, name);
@@ -225,7 +225,7 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("New file").setView(input)
             .setPositiveButton("Create", (d,w) -> {
                 String name = input.getText().toString().trim();
-                if (name.isEmpty() || name.contains("/") || name.contains("\\\\")) { toast("Invalid filename"); return; }
+                if (name.isEmpty() || name.contains("/") || name.contains("\\")) { toast("Invalid filename"); return; }
                 File f = new File(projectDir, name);
                 if (f.exists()) { toast("File already exists"); return; }
                 write(f, ""); currentFile = f; showEditor();
