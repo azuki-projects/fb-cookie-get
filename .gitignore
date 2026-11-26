@@ -1,0 +1,8 @@
+.gradle/
+.idea/
+local.properties
+**/build/
+app/src/main/cpp/node-include/
+app/src/main/jniLibs/
+app/build/downloads/
+app/build/node-mobile-unpacked/
