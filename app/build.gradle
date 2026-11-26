@@ -2,8 +2,6 @@ plugins {
     id 'com.android.application'
 }
 
-import java.util.zip.ZipFile
-
 android {
     namespace 'com.dansapk.nodejsrunner'
     compileSdk 35
@@ -34,14 +32,15 @@ android {
     }
 }
 
-// The native engine is fetched at build time and packaged inside the APK.
-// The app does not download executable libraries at runtime.
+// Download the official Node.js Mobile native engine during the APK build.
+// The .so files are packaged into the APK, so first app launch works offline.
 def nodeMobileVersion = "18.20.4"
 def nodeArchive = layout.buildDirectory.file("downloads/nodejs-mobile-v${nodeMobileVersion}-android.zip")
 def nodeUnpack = layout.buildDirectory.dir("node-mobile-unpacked")
+def generatedRuntime = layout.buildDirectory.dir("generated-node-mobile")
 
 tasks.register("downloadNodeMobile") {
-    outputs.dir(layout.buildDirectory.dir("generated-node-mobile"))
+    outputs.dir(generatedRuntime)
     doLast {
         File archive = nodeArchive.get().asFile
         archive.parentFile.mkdirs()
@@ -76,6 +75,9 @@ tasks.register("downloadNodeMobile") {
             }
         }
         if (!found.contains("arm64-v8a")) throw new GradleException("Node.js Mobile archive is missing arm64-v8a/libnode.so")
+        if (!found.contains("armeabi-v7a")) logger.lifecycle("32-bit ARM library not present; arm64-v8a will still build.")
+        generatedRuntime.get().asFile.mkdirs()
+        new File(generatedRuntime.get().asFile, "runtime-ready.txt").text = "Node.js Mobile ${nodeMobileVersion}"
         logger.lifecycle("Node.js Mobile ready for: " + found.join(", "))
     }
 }
