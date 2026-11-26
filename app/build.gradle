@@ -25,7 +25,12 @@ android {
         cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.22.1' }
     }
 
-    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_1_8\n        targetCompatibility JavaVersion.VERSION_1_8\n    }\n\n    sourceSets.main.jniLibs.srcDirs = ['src/main/jniLibs']
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    sourceSets.main.jniLibs.srcDirs = ['src/main/jniLibs']
 
     packaging {
         jniLibs { useLegacyPackaging true }
