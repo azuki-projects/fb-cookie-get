@@ -46,7 +46,7 @@ function stopActive() {
     return true;
   });
 }
-function startFile(file) {
+function startFile(file, argsText) {
   const absolute = path.resolve(file);
   if (!absolute.startsWith(projectsRoot + path.sep)) {
     throw new Error('Selected file is outside the projects directory');
@@ -62,6 +62,7 @@ function startFile(file) {
       const fs = require('fs');
       const path = require('path');
       const file = workerData.file;
+      process.argv = [process.execPath, file].concat(workerData.args || []);
       const out = (level, args) => {
         const line = args.map(v => {
           if (typeof v === 'string') return v;
@@ -86,7 +87,7 @@ function startFile(file) {
         parentPort.postMessage({ type: 'error', line: error && error.stack ? error.stack : String(error) });
       }
     `;
-    const worker = new Worker(workerSource, { eval: true, workerData: { file: absolute } });
+    const parsedArgs = String(argsText || '').trim().split(/\\s+/).filter(Boolean);\n    const worker = new Worker(workerSource, { eval: true, workerData: { file: absolute, args: parsedArgs } });
     activeWorker = worker;
     worker.on('message', message => {
       if (thisRun !== runId) return;
@@ -118,7 +119,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method !== 'POST') return send(res, 405, { error: 'POST required' });
     const data = await readBody(req);
     if (req.url === '/run') {
-      const result = await startFile(data.file || '');
+      const result = await startFile(data.file || '', data.args || '');
       addLog('[runner] Started ' + path.basename(result.file));
       return send(res, 200, result);
     }
