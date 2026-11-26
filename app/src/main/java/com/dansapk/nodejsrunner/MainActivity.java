@@ -410,10 +410,11 @@ public class MainActivity extends Activity {
             File destination = new File(projectsDir, name);
             int suffix = 2;
             while (destination.exists()) destination = new File(projectsDir, name + "_" + suffix++);
+            final File importTarget = destination;
             try (InputStream raw = getContentResolver().openInputStream(uri);
                  ZipInputStream zip = new ZipInputStream(raw)) {
                 if (raw == null) throw new IOException("Cannot open selected ZIP");
-                String rootPath = destination.getCanonicalPath() + File.separator;
+                String rootPath = importTarget.getCanonicalPath() + File.separator;
                 ZipEntry entry;
                 byte[] buffer = new byte[8192];
                 while ((entry = zip.getNextEntry()) != null) {
