@@ -1,0 +1,83 @@
+plugins {
+    id 'com.android.application'
+}
+
+import java.util.zip.ZipFile
+
+android {
+    namespace 'com.dansapk.nodejsrunner'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.dansapk.nodejsrunner'
+        minSdk 24
+        targetSdk 28
+        versionCode 1
+        versionName '1.0.0'
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
+        externalNativeBuild {
+            cmake {
+                cppFlags '-std=c++17'
+                arguments '-DANDROID_STL=c++_shared'
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.22.1' }
+    }
+
+    sourceSets.main.jniLibs.srcDirs = ['src/main/jniLibs']
+
+    packaging {
+        jniLibs { useLegacyPackaging true }
+    }
+}
+
+// The native engine is fetched at build time and packaged inside the APK.
+// The app does not download executable libraries at runtime.
+def nodeMobileVersion = "18.20.4"
+def nodeArchive = layout.buildDirectory.file("downloads/nodejs-mobile-v${nodeMobileVersion}-android.zip")
+def nodeUnpack = layout.buildDirectory.dir("node-mobile-unpacked")
+
+tasks.register("downloadNodeMobile") {
+    outputs.dir(layout.buildDirectory.dir("generated-node-mobile"))
+    doLast {
+        File archive = nodeArchive.get().asFile
+        archive.parentFile.mkdirs()
+        if (!archive.exists()) {
+            logger.lifecycle("Downloading Node.js Mobile ${nodeMobileVersion} (~57 MB)...")
+            new URL("https://github.com/nodejs-mobile/nodejs-mobile/releases/download/v${nodeMobileVersion}/nodejs-mobile-v${nodeMobileVersion}-android.zip").withInputStream { input ->
+                archive.withOutputStream { output -> output << input }
+            }
+        }
+
+        File unpackDir = nodeUnpack.get().asFile
+        if (unpackDir.exists()) unpackDir.deleteDir()
+        unpackDir.mkdirs()
+        copy { from zipTree(archive); into unpackDir }
+
+        File header = fileTree(unpackDir).matching { include "**/include/node/node.h" }.files.find { it.isFile() }
+        if (header == null) throw new GradleException("Node.js Mobile archive is missing include/node/node.h")
+        File headerOut = file("src/main/cpp/node-include")
+        if (headerOut.exists()) headerOut.deleteDir()
+        copy { from header.parentFile; into headerOut }
+
+        Set<String> wantedAbis = ["arm64-v8a", "armeabi-v7a"] as Set
+        List<File> nodeLibs = fileTree(unpackDir).matching { include "**/libnode.so" }.files as List
+        Set<String> found = [] as Set
+        nodeLibs.each { lib ->
+            String abi = lib.parentFile.name
+            if (wantedAbis.contains(abi)) {
+                File outDir = file("src/main/jniLibs/${abi}")
+                outDir.mkdirs()
+                copy { from lib.parentFile; include "*.so"; into outDir }
+                found.add(abi)
+            }
+        }
+        if (!found.contains("arm64-v8a")) throw new GradleException("Node.js Mobile archive is missing arm64-v8a/libnode.so")
+        logger.lifecycle("Node.js Mobile ready for: " + found.join(", "))
+    }
+}
+
+tasks.named("preBuild").configure { dependsOn("downloadNodeMobile") }
