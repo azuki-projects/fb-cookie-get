@@ -54,7 +54,7 @@ function startFile(file) {
   if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
     throw new Error('File does not exist');
   }
-  return stopActive().then(() => new Promise((resolve, reject) => {
+  return stopActive().then(() => new Promise(resolve => {
     const thisRun = ++runId;
     const workerSource = `
       const { parentPort, workerData } = require('worker_threads');
@@ -86,10 +86,7 @@ function startFile(file) {
         parentPort.postMessage({ type: 'error', line: error && error.stack ? error.stack : String(error) });
       }
     `;
-    const worker = new Worker(workerSource, {
-      eval: true,
-      workerData: { file: absolute }
-    });
+    const worker = new Worker(workerSource, { eval: true, workerData: { file: absolute } });
     activeWorker = worker;
     worker.on('message', message => {
       if (thisRun !== runId) return;
@@ -114,7 +111,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && req.url === '/health') {
       return send(res, 200, { ok: true, version: process.version, running: !!activeWorker });
     }
-    if (req.method === 'GET' && req.url === '/logs') {
+    if (req.url === '/logs' && (req.method === 'GET' || req.method === 'POST')) {
+      if (req.method === 'POST') await readBody(req);
       return send(res, 200, { logs, running: !!activeWorker });
     }
     if (req.method !== 'POST') return send(res, 405, { error: 'POST required' });
