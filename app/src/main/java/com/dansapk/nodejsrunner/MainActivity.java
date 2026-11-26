@@ -3,6 +3,9 @@ package com.dansapk.nodejsrunner;
 import android.app.*;
 import android.os.*;
 import android.content.*;
+import android.net.Uri;
+import android.database.Cursor;
+import android.provider.OpenableColumns;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -14,9 +17,14 @@ import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 public class MainActivity extends Activity {
     private static final int PORT = 38271;
+    private static final int REQ_IMPORT_ZIP = 701;
+    private static final int REQ_EXPORT_ZIP = 702;
     private final int BG = Color.rgb(8, 11, 9);
     private final int PANEL = Color.rgb(18, 26, 21);
     private final int GREEN = Color.rgb(0, 220, 105);
@@ -125,6 +133,12 @@ public class MainActivity extends Activity {
         controls.addView(action("+ New project", this::newProject), new LinearLayout.LayoutParams(0, -2, 1));
         controls.addView(action("Open editor", this::showEditor), new LinearLayout.LayoutParams(0, -2, 1));
         page.addView(controls);
+        LinearLayout transfer = horizontal();
+        transfer.addView(action("Import ZIP", this::importProjectZip), new LinearLayout.LayoutParams(0, -2, 1));
+        transfer.addView(action("Export ZIP", this::exportProjectZip), new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams transferParams = new LinearLayout.LayoutParams(-1, -2);
+        transferParams.topMargin = dp(7);
+        page.addView(transfer, transferParams);
         File[] dirs = projectsDir.listFiles();
         if (dirs == null || dirs.length == 0) {
             page.addView(label("No projects yet. Create one to get started.", 14, Color.LTGRAY));
@@ -241,6 +255,7 @@ public class MainActivity extends Activity {
         controls.addView(action("Run ▶", this::runFile), new LinearLayout.LayoutParams(0, -2, 1));
         controls.addView(action("Stop ■", this::stopFile), new LinearLayout.LayoutParams(0, -2, 1));
         page.addView(controls);
+        page.addView(action("Run settings · entry file and arguments", this::showRunSettings));
         TextView fileLabel = label(currentFile.getName(), 12, GREEN);
         fileLabel.setPadding(0, dp(12), 0, dp(6)); page.addView(fileLabel);
         editor = new EditText(this);
@@ -277,8 +292,14 @@ public class MainActivity extends Activity {
         saveEditor();
         if (currentFile == null) return;
         JSONObject data = new JSONObject();
-        try { data.put("file", currentFile.getAbsolutePath()); }
-        catch (Exception ignored) {}
+        try {
+            String entry = getSharedPreferences("runner", MODE_PRIVATE)
+                .getString("entry_" + currentProject, "");
+            File runFile = entry.trim().isEmpty() ? currentFile : new File(projectDir, entry.trim());
+            data.put("file", runFile.getAbsolutePath());
+            data.put("args", getSharedPreferences("runner", MODE_PRIVATE)
+                .getString("args_" + currentProject, ""));
+        } catch (Exception ignored) {}
         requestAsync("/run", data, result -> {
             toast(result.optBoolean("ok", false) ? "Script started" : result.optString("error", "Run failed"));
             showTerminal();
@@ -317,6 +338,152 @@ public class MainActivity extends Activity {
         requestAsync("/clear", new JSONObject(), result -> {
             if (terminal != null) terminal.setText("");
         });
+    }
+
+
+    private void showRunSettings() {
+        ensureSelection();
+        LinearLayout box = vertical();
+        padding(box, 8);
+        EditText entry = new EditText(this);
+        entry.setSingleLine(true);
+        entry.setHint("Entry file (e.g. index.js)");
+        entry.setText(getSharedPreferences("runner", MODE_PRIVATE)
+            .getString("entry_" + currentProject, ""));
+        box.addView(entry);
+        EditText args = new EditText(this);
+        args.setSingleLine(false);
+        args.setHint("Start arguments (space separated)");
+        args.setText(getSharedPreferences("runner", MODE_PRIVATE)
+            .getString("args_" + currentProject, ""));
+        box.addView(args);
+        new AlertDialog.Builder(this).setTitle("Run configuration").setView(box)
+            .setPositiveButton("Save", (d,w) -> {
+                getSharedPreferences("runner", MODE_PRIVATE).edit()
+                    .putString("entry_" + currentProject, entry.getText().toString().trim())
+                    .putString("args_" + currentProject, args.getText().toString())
+                    .apply();
+                toast("Run settings saved");
+            }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void importProjectZip() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/zip");
+        startActivityForResult(intent, REQ_IMPORT_ZIP);
+    }
+
+    private void exportProjectZip() {
+        ensureSelection();
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/zip");
+        intent.putExtra(Intent.EXTRA_TITLE, currentProject + ".zip");
+        startActivityForResult(intent, REQ_EXPORT_ZIP);
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        Uri uri = data.getData();
+        if (requestCode == REQ_IMPORT_ZIP) importZipFrom(uri);
+        else if (requestCode == REQ_EXPORT_ZIP) exportZipTo(uri);
+    }
+
+    private String displayName(Uri uri) {
+        String name = null;
+        try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (index >= 0) name = cursor.getString(index);
+            }
+        } catch (Exception ignored) {}
+        return name == null ? "ImportedProject.zip" : name;
+    }
+
+    private void importZipFrom(Uri uri) {
+        new Thread(() -> {
+            String name = displayName(uri).replaceAll("(?i)\\.zip$", "")
+                .replaceAll("[^A-Za-z0-9._ -]", "_").trim();
+            if (name.isEmpty()) name = "ImportedProject";
+            File destination = new File(projectsDir, name);
+            int suffix = 2;
+            while (destination.exists()) destination = new File(projectsDir, name + "_" + suffix++);
+            try (InputStream raw = getContentResolver().openInputStream(uri);
+                 ZipInputStream zip = new ZipInputStream(raw)) {
+                if (raw == null) throw new IOException("Cannot open selected ZIP");
+                String rootPath = destination.getCanonicalPath() + File.separator;
+                ZipEntry entry;
+                byte[] buffer = new byte[8192];
+                while ((entry = zip.getNextEntry()) != null) {
+                    String safeName = entry.getName().replace('\\', '/');
+                    if (safeName.startsWith("/") || safeName.equals("..") || safeName.contains("../")) {
+                        zip.closeEntry(); continue;
+                    }
+                    File output = new File(destination, safeName);
+                    if (!output.getCanonicalPath().startsWith(rootPath)) {
+                        zip.closeEntry(); continue;
+                    }
+                    if (entry.isDirectory()) output.mkdirs();
+                    else {
+                        File parent = output.getParentFile();
+                        if (parent != null) parent.mkdirs();
+                        try (FileOutputStream out = new FileOutputStream(output)) {
+                            int count;
+                            while ((count = zip.read(buffer)) != -1) out.write(buffer, 0, count);
+                        }
+                    }
+                    zip.closeEntry();
+                }
+                runOnUiThread(() -> {
+                    if (countFiles(destination) == 0) {
+                        deleteTree(destination);
+                        toast("ZIP did not contain project files");
+                    } else {
+                        selectProject(destination);
+                        toast("Project imported");
+                    }
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> toast("Import failed: " + e.getMessage()));
+            }
+        }, "Project-Import").start();
+    }
+
+    private void exportZipTo(Uri uri) {
+        File source = projectDir;
+        new Thread(() -> {
+            try (OutputStream raw = getContentResolver().openOutputStream(uri);
+                 ZipOutputStream zip = new ZipOutputStream(raw)) {
+                if (raw == null) throw new IOException("Cannot create ZIP file");
+                zipDirectory(source, source.getParentFile(), zip);
+                zip.finish();
+                runOnUiThread(() -> toast("Project exported"));
+            } catch (Exception e) {
+                runOnUiThread(() -> toast("Export failed: " + e.getMessage()));
+            }
+        }, "Project-Export").start();
+    }
+
+    private void zipDirectory(File current, File base, ZipOutputStream zip) throws IOException {
+        File[] children = current.listFiles();
+        if (children == null) return;
+        for (File child : children) {
+            String name = base.toURI().relativize(child.toURI()).getPath();
+            if (child.isDirectory()) {
+                zip.putNextEntry(new ZipEntry(name.endsWith("/") ? name : name + "/"));
+                zip.closeEntry();
+                zipDirectory(child, base, zip);
+            } else {
+                zip.putNextEntry(new ZipEntry(name));
+                try (InputStream in = new FileInputStream(child)) {
+                    byte[] buffer = new byte[8192]; int count;
+                    while ((count = in.read(buffer)) != -1) zip.write(buffer, 0, count);
+                }
+                zip.closeEntry();
+            }
+        }
     }
 
     private void requestAsync(String path, JSONObject body, java.util.function.Consumer<JSONObject> callback) {
